@@ -54,15 +54,15 @@ public sealed class ActionPlanner : IActionPlanner
     /// </summary>
     /// <param name="kernel">The semantic kernel instance.</param>
     /// <param name="prompt">Optional prompt override</param>
-    /// <param name="logger">Optional logger</param>
+    /// <param name="loggerFactory">The <see cref="ILoggerFactory"/> to use for logging. If null, no logging will be performed.</param>
     public ActionPlanner(
         IKernel kernel,
         string? prompt = null,
-        ILogger? logger = null)
+        ILoggerFactory? loggerFactory = null)
     {
         Verify.NotNull(kernel);
 
-        this._logger = logger ?? new NullLogger<ActionPlanner>();
+        this._logger = loggerFactory is not null ? loggerFactory.CreateLogger(typeof(ActionPlanner)) : NullLogger.Instance;
 
         string promptTemplate = prompt ?? EmbeddedResource.Read("skprompt.txt");
 
@@ -113,12 +113,15 @@ public sealed class ActionPlanner : IActionPlanner
             plan = new Plan(goal);
         }
 
-        // Create a plan using the function and the parameters suggested by the planner
-        foreach (KeyValuePair<string, object> p in planData.Plan.Parameters)
+        // Populate plan parameters using the function and the parameters suggested by the planner
+        if (plan.Steps.Count > 0)
         {
-            if (p.Value != null)
+            foreach (KeyValuePair<string, object> p in planData.Plan.Parameters)
             {
-                plan.Parameters[p.Key] = p.Value.ToString();
+                if (p.Value != null)
+                {
+                    plan.Steps[0].Parameters[p.Key] = p.Value.ToString();
+                }
             }
         }
 

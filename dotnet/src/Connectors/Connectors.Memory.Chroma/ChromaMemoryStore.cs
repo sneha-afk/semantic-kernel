@@ -27,9 +27,9 @@ public class ChromaMemoryStore : IMemoryStore
     /// Initializes a new instance of the <see cref="ChromaMemoryStore"/> class.
     /// </summary>
     /// <param name="endpoint">Chroma server endpoint URL.</param>
-    /// <param name="logger">Optional logger instance.</param>
-    public ChromaMemoryStore(string endpoint, ILogger? logger = null)
-        : this(new ChromaClient(endpoint, logger), logger)
+    /// <param name="loggerFactory">The <see cref="ILoggerFactory"/> to use for logging. If null, no logging will be performed.</param>
+    public ChromaMemoryStore(string endpoint, ILoggerFactory? loggerFactory = null)
+        : this(new ChromaClient(endpoint, loggerFactory), loggerFactory)
     {
     }
 
@@ -38,9 +38,9 @@ public class ChromaMemoryStore : IMemoryStore
     /// </summary>
     /// <param name="httpClient">The <see cref="HttpClient"/> instance used for making HTTP requests.</param>
     /// <param name="endpoint">Chroma server endpoint URL.</param>
-    /// <param name="logger">Optional logger instance.</param>
-    public ChromaMemoryStore(HttpClient httpClient, string? endpoint = null, ILogger? logger = null)
-        : this(new ChromaClient(httpClient, endpoint, logger), logger)
+    /// <param name="loggerFactory">The <see cref="ILoggerFactory"/> to use for logging. If null, no logging will be performed.</param>
+    public ChromaMemoryStore(HttpClient httpClient, string? endpoint = null, ILoggerFactory? loggerFactory = null)
+        : this(new ChromaClient(httpClient, endpoint, loggerFactory), loggerFactory)
     {
     }
 
@@ -48,11 +48,11 @@ public class ChromaMemoryStore : IMemoryStore
     /// Initializes a new instance of the <see cref="ChromaMemoryStore"/> class.
     /// </summary>
     /// <param name="client">Instance of <see cref="IChromaClient"/> implementation.</param>
-    /// <param name="logger">Optional logger instance.</param>
-    public ChromaMemoryStore(IChromaClient client, ILogger? logger = null)
+    /// <param name="loggerFactory">The <see cref="ILoggerFactory"/> to use for logging. If null, no logging will be performed.</param>
+    public ChromaMemoryStore(IChromaClient client, ILoggerFactory? loggerFactory = null)
     {
         this._chromaClient = client;
-        this._logger = logger ?? NullLogger<ChromaMemoryStore>.Instance;
+        this._logger = loggerFactory is not null ? loggerFactory.CreateLogger(typeof(ChromaMemoryStore)) : NullLogger.Instance;
     }
 
     /// <inheritdoc />
@@ -72,7 +72,7 @@ public class ChromaMemoryStore : IMemoryStore
         {
             await this._chromaClient.DeleteCollectionAsync(collectionName, cancellationToken).ConfigureAwait(false);
         }
-        catch (SKException e) when (CollectionDoesNotExistException(e, collectionName))
+        catch (HttpOperationException e) when (VerifyCollectionDoesNotExistMessage(e.ResponseContent, collectionName))
         {
             this._logger.LogError("Cannot delete non-existent collection {0}", collectionName);
             throw new SKException($"Cannot delete non-existent collection {collectionName}", e);
@@ -254,7 +254,7 @@ public class ChromaMemoryStore : IMemoryStore
         {
             return await this._chromaClient.GetCollectionAsync(collectionName, cancellationToken).ConfigureAwait(false);
         }
-        catch (SKException e) when (CollectionDoesNotExistException(e, collectionName))
+        catch (HttpOperationException e) when (VerifyCollectionDoesNotExistMessage(e.ResponseContent, collectionName))
         {
             this._logger.LogDebug("Collection {0} does not exist", collectionName);
 
@@ -325,7 +325,7 @@ public class ChromaMemoryStore : IMemoryStore
 
     private double GetSimilarityScore(List<double>? distances, int recordIndex)
     {
-        var similarityScore = distances != null ? 1 - distances[recordIndex] : default;
+        var similarityScore = distances != null ? 1.0 / (1.0 + distances[recordIndex]) : default;
 
         if (similarityScore < 0)
         {
@@ -338,11 +338,11 @@ public class ChromaMemoryStore : IMemoryStore
     /// <summary>
     /// Checks if Chroma API error means that collection does not exist.
     /// </summary>
-    /// <param name="exception">Chroma exception.</param>
+    /// <param name="responseContent">Response content.</param>
     /// <param name="collectionName">Collection name.</param>
-    private static bool CollectionDoesNotExistException(Exception exception, string collectionName)
+    private static bool VerifyCollectionDoesNotExistMessage(string? responseContent, string collectionName)
     {
-        return exception?.Message?.Contains(string.Format(CultureInfo.InvariantCulture, "Collection {0} does not exist", collectionName)) ?? false;
+        return responseContent?.Contains(string.Format(CultureInfo.InvariantCulture, "Collection {0} does not exist", collectionName)) ?? false;
     }
 
     #endregion
